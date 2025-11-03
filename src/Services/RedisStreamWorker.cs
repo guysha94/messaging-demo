@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using MessagingDemo.Utils;
 
 namespace MessagingDemo.Services;
 
@@ -20,8 +19,7 @@ public class RedisStreamWorker : IHostedLifecycleService
     private string _consumerName => _options.ConsumerAppName;
     private TimeSpan _blockTimeout => _options.BlockTimeout;
 
-    private static readonly string TrimScript = LuaScript.Prepare(File.ReadAllText( Path.Combine(
-        AppContext.BaseDirectory, "trim.lua"))).ExecutableScript;
+    private static readonly string TrimScript = LuaScript.Prepare(Constants.TrimScript).ExecutableScript;
 
 
     private static readonly
@@ -145,7 +143,7 @@ public class RedisStreamWorker : IHostedLifecycleService
                         var completed = await Task.WhenAny(tasks);
                         tasks.Remove(completed);
                     }
-                    
+
                     tasks.Add(ProcessEntry(ep, entry, db, settings, maxDeliveries, ct));
                 }
 
@@ -160,14 +158,14 @@ public class RedisStreamWorker : IHostedLifecycleService
         }
     }
 
-    private async Task ProcessEntry(IConsumerConfigurator ep, StreamEntry e, IDatabase db, 
+    private async Task ProcessEntry(IConsumerConfigurator ep, StreamEntry e, IDatabase db,
         EndpointSettings settings, int maxDeliveries, CancellationToken ct)
     {
         // Optimize: Build dictionary once and reuse
         RedisValue? payload = null;
         RedisValue? typeNameValue = null;
         var headers = new Dictionary<string, string>(e.Values.Length);
-        
+
         foreach (var value in e.Values)
         {
             var name = value.Name.ToString();
@@ -184,11 +182,12 @@ public class RedisStreamWorker : IHostedLifecycleService
                 headers[name] = value.Value.ToString();
             }
         }
-        
+
         // Validate required fields
         if (!payload.HasValue || !typeNameValue.HasValue)
         {
-            _logger.LogWarning("Message {MessageId} missing required fields (payload or type), acknowledging and skipping",
+            _logger.LogWarning(
+                "Message {MessageId} missing required fields (payload or type), acknowledging and skipping",
                 e.Id);
             await db.StreamAcknowledgeAsync(ep.Stream, ep.Group, e.Id);
             return;
@@ -199,13 +198,14 @@ public class RedisStreamWorker : IHostedLifecycleService
         Type messageType;
         try
         {
-            messageType = _typeCache.GetOrAdd(typeName, t => 
+            messageType = _typeCache.GetOrAdd(typeName, t =>
             {
                 var type = Type.GetType(t);
                 if (type == null)
                 {
                     throw new TypeLoadException($"Type '{t}' not found");
                 }
+
                 return type;
             });
         }
@@ -213,7 +213,7 @@ public class RedisStreamWorker : IHostedLifecycleService
         {
             _logger.LogError("Cannot resolve message type {TypeName} for message {MessageId}, sending to DLQ",
                 typeName, e.Id);
-            await SendToDlq(ep, db, e.Values, e.Id, Constants.DeserializeErrorReason, 
+            await SendToDlq(ep, db, e.Values, e.Id, Constants.DeserializeErrorReason,
                 $"Type '{typeName}' not found");
             await db.StreamAcknowledgeAsync(ep.Stream, ep.Group, e.Id);
             return;
@@ -263,7 +263,7 @@ public class RedisStreamWorker : IHostedLifecycleService
         {
             _logger.LogError(ex, "Error processing message {MessageId} (delivery attempt {Attempt}/{Max})",
                 e.Id, deliveries, maxDeliveries);
-            
+
             if (deliveries >= maxDeliveries)
             {
                 _logger.LogWarning("Message {MessageId} exceeded max deliveries ({Max}), sending to DLQ",
@@ -319,7 +319,7 @@ public class RedisStreamWorker : IHostedLifecycleService
             fields[values.Length] = new(Constants.DlqReasonHeader, reason);
             fields[values.Length + 1] = new(Constants.DlqDetailHeader, detail ?? string.Empty);
             fields[values.Length + 2] = new(Constants.OriginalMessageIdHeader, id);
-            
+
             await db.StreamAddAsync(dlq, fields);
             _logger.LogInformation("Message {MessageId} sent to DLQ {DlqStream} (reason: {Reason})",
                 id, dlq, reason);
@@ -334,7 +334,7 @@ public class RedisStreamWorker : IHostedLifecycleService
     }
 
     private static readonly ConcurrentDictionary<Type, MethodInfo> _deserializeMethodCache = new();
-    
+
     private static object Deserialize(IMessageSerializer serializer, Type t, byte[] payload)
     {
         var method = _deserializeMethodCache.GetOrAdd(t, type =>
@@ -342,7 +342,7 @@ public class RedisStreamWorker : IHostedLifecycleService
             var deserializeMethod = typeof(IMessageSerializer).GetMethod(nameof(IMessageSerializer.Deserialize));
             return deserializeMethod!.MakeGenericMethod(type);
         });
-        
+
         return method.Invoke(serializer, [payload])!;
     }
 

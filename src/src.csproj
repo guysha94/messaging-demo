@@ -27,11 +27,5 @@
         <PackageReference Include="StackExchange.Redis.Extensions.AspNetCore" Version="11.0.0" />
         <PackageReference Include="StackExchange.Redis.Extensions.System.Text.Json" Version="11.0.0" />
     </ItemGroup>
-    
-    <ItemGroup>
-      <None Update="trim.lua">
-        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      </None>
-    </ItemGroup>
 
 </Project>
